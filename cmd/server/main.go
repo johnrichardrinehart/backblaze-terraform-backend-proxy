@@ -14,7 +14,7 @@ import (
 
 func main() {
 
-	s, err := backend.NewServer("localhost:8080", "", "")
+	s, err := backend.NewServer("localhost:8080", "", "", nil)
 	if err != nil {
 		log.Fatalf("failed to start server: %s", err)
 	}

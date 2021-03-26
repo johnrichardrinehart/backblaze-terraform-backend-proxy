@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var ErrLocked = errors.New("error writing - resource locked")
+var ErrNotLocked = errors.New("error writing - resource not locked")
 
 type Storer interface {
 	Store(io.Reader) error // stores the state
@@ -40,7 +40,7 @@ type Lock struct {
 	Path      string
 }
 
-func NewServer(addr, keyID, appKey string) (*Proxy, error) {
+func NewServer(addr, keyID, appKey string, storer Storer) (*Proxy, error) {
 	p := &Proxy{
 		keyID:          keyID,
 		applicationKey: appKey,
@@ -54,6 +54,10 @@ func NewServer(addr, keyID, appKey string) (*Proxy, error) {
 	}
 	p.Server = s
 
+	if storer == nil {
+		return nil, errors.New("provided Storer must be non-nil")
+	}
+	p.Storer = storer
 	return p, nil
 }
 
@@ -124,7 +128,12 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 		if err := p.lockState(r.Body); err != nil {
 			log.Printf("failed to lock state: %s", err)
 		}
+	case "UNLOCK":
+		if err := p.unlockState(r.Body); err != nil {
+			log.Printf("failed to lock state: %s", err)
+		}
 	}
+
 }
 
 func (*Proxy) getState(r *http.Request) ([]byte, error) {
@@ -154,8 +163,8 @@ func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
 	}
 
 	p.RLock()
-	if p.locker[id] {
-		return ErrLocked
+	if !p.locker[id] {
+		return ErrNotLocked
 	}
 	p.RUnlock()
 	return p.Store(body)
