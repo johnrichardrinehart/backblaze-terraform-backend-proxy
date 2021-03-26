@@ -13,8 +13,22 @@ import (
 )
 
 func main() {
+	keyID, exists := os.LookupEnv("B2_KEY_ID")
+	if !exists {
+		log.Fatal("B2_KEY_ID env var is undefined")
+	}
 
-	s, err := backend.NewServer("localhost:8080", "", "", nil)
+	appKey, exists := os.LookupEnv("B2_APP_KEY")
+	if !exists {
+		log.Fatal("B2_APP_KEY env var is undefined")
+	}
+
+	b2, err := backend.NewB2(keyID, appKey, "test")
+	if err != nil {
+		log.Fatalf("failed to construct B2 backend: %s", err)
+	}
+
+	s, err := backend.NewServer("localhost:8080", b2)
 	if err != nil {
 		log.Fatalf("failed to start server: %s", err)
 	}

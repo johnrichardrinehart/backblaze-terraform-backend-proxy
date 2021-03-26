@@ -22,9 +22,7 @@ type Storer interface {
 }
 
 type Proxy struct {
-	keyID          string
-	applicationKey string
-	locker         map[string]bool
+	locker map[string]bool
 	Storer
 	*http.Server
 	sync.RWMutex // (un)lock locker
@@ -40,16 +38,14 @@ type Lock struct {
 	Path      string
 }
 
-func NewServer(addr, keyID, appKey string, storer Storer) (*Proxy, error) {
+func NewServer(proxyAddress string, storer Storer) (*Proxy, error) {
 	p := &Proxy{
-		keyID:          keyID,
-		applicationKey: appKey,
-		locker:         make(map[string]bool),
-		Server:         nil,
+		locker: make(map[string]bool),
+		Server: nil,
 	}
 	// TODO: move http.Server to the top of NewServer, blocked by Handler field
 	s := &http.Server{
-		Addr:    addr,
+		Addr:    proxyAddress,
 		Handler: http.HandlerFunc(p.handle),
 	}
 	p.Server = s
