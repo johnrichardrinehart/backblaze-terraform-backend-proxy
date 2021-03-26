@@ -170,6 +170,7 @@ func (p *Proxy) lockState(body io.Reader) error {
 		return err
 	}
 
+	p.lock(l.ID)
 	return nil
 }
 
