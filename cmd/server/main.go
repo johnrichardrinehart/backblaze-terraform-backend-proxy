@@ -27,6 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to construct B2 backend: %s", err)
 	}
+	log.Println("store connection established successfully")
 
 	s, err := backend.NewServer("localhost:8080", b2)
 	if err != nil {
