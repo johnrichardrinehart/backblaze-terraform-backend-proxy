@@ -174,8 +174,27 @@ func (p *Proxy) lockState(body io.Reader) error {
 	return nil
 }
 
+func (p *Proxy) unlockState(body io.Reader) error {
+	log.Println("unlocking state")
+
+	var l Lock
+
+	if err := json.NewDecoder(body).Decode(&l); err != nil {
+		return err
+	}
+
+	p.unlock(l.ID)
+	return nil
+}
+
 func (p *Proxy) lock(id string) {
 	p.Lock()
 	p.locker[id] = true
+	p.Unlock()
+}
+
+func (p *Proxy) unlock(id string) {
+	p.Lock()
+	delete(p.locker, id) // no-op if not exist
 	p.Unlock()
 }
