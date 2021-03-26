@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"strconv"
 	"sync"
 	"time"
@@ -80,9 +79,8 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
-	bs, _ := httputil.DumpRequest(r, true)
-
-	log.Printf("%s", bs)
+	// bs, _ := httputil.DumpRequest(r, true)
+	// log.Printf("%s", bs)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -139,7 +137,7 @@ func (*Proxy) getState(r *http.Request) ([]byte, error) {
 }
 
 func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
-	log.Println("posted state\n")
+	log.Println("posting state\n")
 
 	h := md5.New()
 
