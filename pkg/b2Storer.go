@@ -7,14 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strconv"
-	"time"
 )
 
 const AUTH_URL = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account"
@@ -22,10 +18,11 @@ const API_VERSION = "v2"
 
 type B2 struct {
 	AccountAuthorizationAPIToken string // auth token for API calls - valid for 24h
-	ObjectPath                   string // path in B2 to the state file
 	APIUrl                       string // for API calls (not uploading/downloading)
-	DownloadURL                  string // for downloading files (upload URLs are obtained from get_upload_url)
+	Filename                     string // filename of the object to upload/download
+	FilenamePrefix               string // bucket-configured filename prefix (app key security restriction)
 	BucketID                     string // Bucket on which to perform operations
+	// DownloadURL                  string // for downloading files (upload URLs are obtained from get_upload_url)
 }
 
 type allowed struct {
@@ -55,15 +52,15 @@ type responseUploadFile struct {
 	AccountId            string
 	Action               string // start/upload/hide/folder
 	BucketId             string
-	ContentLength        string
+	ContentLength        uint64
 	ContentSha1          string
 	ContentMd5           string `json:",omitempty"`
 	ContentType          string
 	FileId               string
 	FileInfo             map[string]interface{}
 	FileName             string
-	ServerSideEncryption string    // SSE-B2/SSE-C + algo
-	UploadTimestamp      time.Time // uint64, ms since Unix epoch
+	ServerSideEncryption string // SSE-B2/SSE-C + algo
+	UploadTimestamp      uint64 // uint64, ms since Unix epoch
 }
 
 // NewB2 constructs a new B2 instance
@@ -72,12 +69,14 @@ func NewB2(keyID, appKey, path string) (*B2, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error authorizing keyID %s: %s", keyID, err)
 	}
+
 	b2 := B2{
 		AccountAuthorizationAPIToken: authInfo.AuthorizationToken,
-		ObjectPath:                   path,
 		APIUrl:                       authInfo.ApiUrl,
-		DownloadURL:                  authInfo.DownloadUrl,
+		Filename:                     path,
+		FilenamePrefix:               authInfo.Allowed.NamePrefix,
 		BucketID:                     authInfo.Allowed.BucketID,
+		// DownloadURL:                  authInfo.DownloadUrl,
 	}
 	return &b2, nil
 }
@@ -85,19 +84,16 @@ func NewB2(keyID, appKey, path string) (*B2, error) {
 // Store writes the bytes to B2 at b2.Path
 // 1. Get the URL for uploading
 // 2. Upload the datfa
-func (b2 B2) Store(r io.Reader) error {
+func (b2 B2) Store(bs []byte) error {
 	upURLInfo, err := b2.getUploadURL()
 	if err != nil {
 		return fmt.Errorf("failed to obtain upload URL: %s", err)
 	}
 
-	log.Printf("Uploading URL info:\n%+v", upURLInfo)
-
-	uploadInfo, err := b2.uploadFile(upURLInfo.UploadAuthorizationToken, upURLInfo.UploadURL, r)
+	_, err = b2.uploadFile(upURLInfo.UploadAuthorizationToken, upURLInfo.UploadURL, bs)
 	if err != nil {
 		return err
 	}
-	log.Printf("%+v", uploadInfo)
 	return nil
 }
 
@@ -139,28 +135,21 @@ func (b2 B2) getUploadURL() (*responseGetUploadURL, error) {
 	return &getUploadURL, nil
 }
 
-func (b2 B2) uploadFile(uploadToken, url string, rdr io.Reader) (*responseUploadFile, error) {
-	bs, err := ioutil.ReadAll(rdr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read body for uploading file: %s", err)
-	}
+func (b2 B2) uploadFile(uploadToken, url string, data []byte) (*responseUploadFile, error) {
 	// Define Request
-	r, err := http.NewRequest(http.MethodPost, url, nil)
+	r, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("error creating auth request: %s", err)
 	}
 	r.Header.Add("Authorization", uploadToken)
-	r.Header.Add("X-Bz-File-Name", b2.ObjectPath)
+	r.Header.Add("X-Bz-File-Name", b2.FilenamePrefix+"/"+b2.Filename)
 	r.Header.Add("Content-Type", "application/octet-stream")
-	r.Header.Add("Content-Length", strconv.Itoa(len(bs)))
+	r.Header.Add("Content-Length", strconv.Itoa(len(data)))
 	h := sha1.New()
-	if _, err = h.Write(bs); err != nil {
+	if _, err = h.Write(data); err != nil {
 		return nil, fmt.Errorf("failed to generated SHA-1 sum for upload file: %s", err)
 	}
 	r.Header.Add("X-Bz-Content-Sha1", hex.EncodeToString(h.Sum(nil)))
-
-	bs, _ = httputil.DumpRequestOut(r, true)
-	log.Printf("Upload file request:\n%+v", r)
 
 	// Execute Request
 	rsp, err := http.DefaultClient.Do(r)
@@ -174,7 +163,7 @@ func (b2 B2) uploadFile(uploadToken, url string, rdr io.Reader) (*responseUpload
 		if err != nil {
 			return nil, fmt.Errorf("failed to dump response body: %s", err)
 		}
-		return nil, fmt.Errorf("B2 Authorization upload file request failed with status code %d and message %s", rsp.StatusCode, bs)
+		return nil, fmt.Errorf("B2 upload file request failed with status code %d and message %s", rsp.StatusCode, bs)
 	}
 
 	// JSON
@@ -217,7 +206,6 @@ func authorizeAccount(keyID, appKey string) (*responseAuthorizeAccount, error) {
 		return nil, fmt.Errorf("error obtaining authorization info: %s", err)
 	}
 
-	log.Printf("Authorization info:\n%+v", authInfo)
 	return &authInfo, nil
 }
 

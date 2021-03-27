@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -17,7 +19,7 @@ import (
 var ErrNotLocked = errors.New("error writing - resource not locked")
 
 type Storer interface {
-	Store(io.Reader) error // stores the state
+	Store([]byte) error // stores the state
 }
 
 type Proxy struct {
@@ -139,16 +141,22 @@ func (*Proxy) getState(r *http.Request) ([]byte, error) {
 func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
 	log.Println("posting state\n")
 
-	h := md5.New()
-
-	m, err := io.Copy(h, body)
+	// read the body
+	bs, err := ioutil.ReadAll(body)
 	if err != nil {
-		return err
-	}
-	if m != n {
-		return errors.New("invalid content length")
+		return fmt.Errorf("failed to read body: %s", err)
 	}
 
+	// md5-hash it
+	h := md5.New()
+	if n, err := h.Write(bs); n != len(bs) || err != nil {
+		if n != len(bs) {
+			return fmt.Errorf("failed to generate md5 sum of file: %d bytes expected to be written - %d actually written", len(bs), n)
+		}
+		return fmt.Errorf("failed to generate md5 sum of file: %s", err)
+	}
+
+	// base64-ify the md5 hash
 	calcSum := base64.StdEncoding.EncodeToString(h.Sum(nil))
 
 	if calcSum != md5sum {
@@ -161,7 +169,8 @@ func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
 		return ErrNotLocked
 	}
 	p.RUnlock()
-	return p.Store(body)
+
+	return p.Store(bs)
 }
 
 func (p *Proxy) lockState(body io.Reader) error {
