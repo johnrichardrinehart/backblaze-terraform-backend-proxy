@@ -4,6 +4,13 @@
 management using an HTTP server. So, this project looks to set up an interface between `terraform` and Backblaze (`B2`) 
 using an HTTP server that handles processing state updates from `terraform` and fetching state from `B2`.
 
+# Getting Started
+
+1. Create a `B2` bucket - make sure to enable object locking (if you want to use `terraform` state locking)
+1. Create an application key (see note below for why the default master key can not be used)
+1. Start the server as `B2_KEY_ID=$B2_KEY_ID B2_APP_KEY=$SUPER_SECRET_ACCESS_KEY ./server`
+1. Use `terraform` as usual
+
 # Note about Locking
 
 `terraform` supports locking state files in order to prevent concurrent writes. `B2` also supports locking files/objects
