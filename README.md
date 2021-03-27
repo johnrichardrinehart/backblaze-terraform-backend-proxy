@@ -26,3 +26,18 @@ Application Keys that are manually created in the Backblaze Web UI or via the Ba
 authenticate the Backblaze S3 Compatible API.
 
 So, make sure to create an application key that can be used with this integration.
+
+# Problems I had with Backblaze
+
+So, below is a laundry list of issues I encountered when trying to develop this service. Some of them are documentation issues, some of them are UI issues, and some of them are best practice issues.
+
+1. The "native" API seems more like a legacy API. Object locking is not supported with the "native" API but *is* through the S3 API. The idea of a Backblaze-first API is great, but if it lacks features relative to a competitor's API then just adopt one. Probably the "native" API still exists for compatibility reasons (customers still use it). But, then start a deprecation process, help your customers migrate, make the current limitations of the native API very clear, and invest all engineering and documentation into the S3 API.
+1. The documentation for the S3 API is pretty sparse, including which region should be used when using the AWS SDK. You can find demo code [here](https://help.backblaze.com/hc/en-us/articles/360047629713?_ga=2.46341987.575951376.1616680733-785951114.1616322351) but there is no code formatting, syntax highlighting, and that code didn't even work. About that last point: After struggling with authentication issues for a while I discovered that the host provided is the wrong one (even though it looks right). I had to parse the host from a *screenshot* on another [page](https://help.backblaze.com/hc/en-us/articles/360047779633-Configuring-the-AWS-CLI-for-use-with-B2) documenting how to use the AWS CLI (not the Go SDK) which you might not even guess is the right host to use, because the only difference between that host and the one on the article/blog post about the Go SDK seems to be the AWS region part of the hostname, and:
+   - no region *needs* to be specified with the AWS CLI when using a Backblaze host
+   - the region in the `endpoint` host name of the demo code *matched* the region used in the `aws.Config` struct, so I was biased to think it was the *right* hostname
+   - the error I was getting was a `403` error claiming my "`key '01234...abcd...000' is not valid`", which you probably wouldn't guess would be fixed by changing the `endpoint`...
+1. The documentation is really hard to read and navigate
+    - The native HTTP API doesn't specify what HTTP method to use when making a request (technically, if you inspect the Java/Python/Curl examples you can parse it out)
+    - The demo code doesn't use a monospace/code font, it's not syntax-highlighted, it's not indent properly. It's not even idiomatic Go code (`err.Error()` when printing a formatted string?), so it's really hard to read.
+    - Some example code snippets use images (https://help.backblaze.com/hc/article_attachments/360069634513/image-0.png) instead of text, so you can't copy-paste
+1. The web UI to view files in the bucket is slow to update the content. Page refreshes, B2 portal navigations, traversing bucket filesystem depths (jump up/down a level) doesn't seem to help. It seems to take at least 20s to register changes, but it's very unpredictable (could take a minute).
