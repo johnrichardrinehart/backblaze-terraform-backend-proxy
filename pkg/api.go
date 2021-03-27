@@ -18,9 +18,9 @@ import (
 var ErrNotLocked = errors.New("error writing - resource not locked")
 
 type Storer interface {
-	Store([]byte) error  // Store file in bucket
-	Lock(string) error   // Lock bucket file
-	Unlock(string) error // Unlock bucket file
+	Store([]byte) error // Store file in bucket
+	Lock() error        // Lock bucket file
+	Unlock() error      // Unlock bucket file
 }
 
 type Proxy struct {
@@ -79,8 +79,6 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
-	// bs, _ := httputil.DumpRequest(r, true)
-	// log.Printf("%s", bs)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -174,7 +172,7 @@ func (p *Proxy) lockState(body io.Reader) error {
 		return err
 	}
 
-	return p.Lock(l.Path)
+	return p.Lock()
 }
 
 func (p *Proxy) unlockState(body io.Reader) error {
@@ -186,5 +184,5 @@ func (p *Proxy) unlockState(body io.Reader) error {
 		return err
 	}
 
-	return p.Unlock(l.Path)
+	return p.Unlock()
 }

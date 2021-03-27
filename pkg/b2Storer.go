@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -98,7 +97,6 @@ func authorizeAccount(keyID, appKey string) (*responseAuthorizeAccount, error) {
 		return nil, fmt.Errorf("error obtaining authorization info: %s", err)
 	}
 
-	log.Printf("%+v", authInfo)
 	return &authInfo, nil
 }
 
@@ -156,7 +154,7 @@ func (b2 B2) Store(bs []byte) error {
 	return nil
 }
 
-func (b2 B2) Lock(filename string) error {
+func (b2 B2) Lock() error {
 	bucketName := aws.String(b2.BucketName)
 	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
 
@@ -173,7 +171,7 @@ func (b2 B2) Lock(filename string) error {
 	return nil
 }
 
-func (b2 B2) Unlock(filename string) error {
+func (b2 B2) Unlock() error {
 	bucketName := aws.String(b2.BucketName)
 	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
 
