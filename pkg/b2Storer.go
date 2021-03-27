@@ -66,6 +66,42 @@ type responseUploadFile struct {
 	UploadTimestamp      uint64 // uint64, ms since Unix epoch
 }
 
+func authorizeAccount(keyID, appKey string) (*responseAuthorizeAccount, error) {
+	// Define Request
+	authString := "Basic " + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", keyID, appKey)))
+	r, err := http.NewRequest(http.MethodGet, AUTH_URL, nil)
+	r.Header.Add("Authorization", authString)
+	if err != nil {
+		return nil, fmt.Errorf("error creating auth request: %s", err)
+	}
+
+	// Execute Request
+	rsp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		return nil, fmt.Errorf("error obtaining auth response: %s", err)
+	}
+
+	// Check for problems
+	if rsp.StatusCode != 200 {
+		bs, err := ioutil.ReadAll(rsp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dump response body: %s", err)
+		}
+		return nil, fmt.Errorf("B2 Authorization request failed with status code %d and message %s", rsp.StatusCode, bs)
+	}
+
+	defer rsp.Body.Close()
+
+	// JSON
+	var authInfo responseAuthorizeAccount
+	if err := json.NewDecoder(rsp.Body).Decode(&authInfo); err != nil {
+		return nil, fmt.Errorf("error obtaining authorization info: %s", err)
+	}
+
+	log.Printf("%+v", authInfo)
+	return &authInfo, nil
+}
+
 // NewB2 constructs a new B2 instance
 func NewB2(keyID, appKey, path string) (*B2, error) {
 	authInfo, err := authorizeAccount(keyID, appKey)
@@ -127,40 +163,4 @@ func (b2 B2) Lock(filename string) error {
 
 func (b2 B2) Unlock(filename string) error {
 	return nil
-}
-
-func authorizeAccount(keyID, appKey string) (*responseAuthorizeAccount, error) {
-	// Define Request
-	authString := "Basic " + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", keyID, appKey)))
-	r, err := http.NewRequest(http.MethodGet, AUTH_URL, nil)
-	r.Header.Add("Authorization", authString)
-	if err != nil {
-		return nil, fmt.Errorf("error creating auth request: %s", err)
-	}
-
-	// Execute Request
-	rsp, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return nil, fmt.Errorf("error obtaining auth response: %s", err)
-	}
-
-	// Check for problems
-	if rsp.StatusCode != 200 {
-		bs, err := ioutil.ReadAll(rsp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to dump response body: %s", err)
-		}
-		return nil, fmt.Errorf("B2 Authorization request failed with status code %d and message %s", rsp.StatusCode, bs)
-	}
-
-	defer rsp.Body.Close()
-
-	// JSON
-	var authInfo responseAuthorizeAccount
-	if err := json.NewDecoder(rsp.Body).Decode(&authInfo); err != nil {
-		return nil, fmt.Errorf("error obtaining authorization info: %s", err)
-	}
-
-	log.Printf("%+v", authInfo)
-	return &authInfo, nil
 }
