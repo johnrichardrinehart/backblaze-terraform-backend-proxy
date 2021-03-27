@@ -131,13 +131,13 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (*Proxy) getState(r *http.Request) ([]byte, error) {
-	log.Println("getting state\n")
+	log.Println("getting state")
 
 	return nil, nil
 }
 
 func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
-	log.Println("posting state\n")
+	log.Println("posting state")
 
 	// read the body
 	bs, err := ioutil.ReadAll(body)
