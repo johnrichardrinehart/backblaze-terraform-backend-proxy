@@ -12,21 +12,20 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 )
 
 var ErrNotLocked = errors.New("error writing - resource not locked")
 
 type Storer interface {
-	Store([]byte) error // stores the state
+	Store([]byte) error  // Store file in bucket
+	Lock(string) error   // Lock bucket file
+	Unlock(string) error // Unlock bucket file
 }
 
 type Proxy struct {
-	locker map[string]bool
 	Storer
 	*http.Server
-	sync.RWMutex // (un)lock locker
 }
 
 type Lock struct {
@@ -41,7 +40,6 @@ type Lock struct {
 
 func NewServer(proxyAddress string, storer Storer) (*Proxy, error) {
 	p := &Proxy{
-		locker: make(map[string]bool),
 		Server: nil,
 	}
 	// TODO: move http.Server to the top of NewServer, blocked by Handler field
@@ -164,12 +162,6 @@ func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
 		return errors.New("invalid checksum")
 	}
 
-	p.RLock()
-	if !p.locker[id] {
-		return ErrNotLocked
-	}
-	p.RUnlock()
-
 	return p.Store(bs)
 }
 
@@ -182,8 +174,7 @@ func (p *Proxy) lockState(body io.Reader) error {
 		return err
 	}
 
-	p.lock(l.ID)
-	return nil
+	return p.Lock(l.Path)
 }
 
 func (p *Proxy) unlockState(body io.Reader) error {
@@ -195,18 +186,5 @@ func (p *Proxy) unlockState(body io.Reader) error {
 		return err
 	}
 
-	p.unlock(l.ID)
-	return nil
-}
-
-func (p *Proxy) lock(id string) {
-	p.Lock()
-	p.locker[id] = true
-	p.Unlock()
-}
-
-func (p *Proxy) unlock(id string) {
-	p.Lock()
-	delete(p.locker, id) // no-op if not exist
-	p.Unlock()
+	return p.Unlock(l.Path)
 }

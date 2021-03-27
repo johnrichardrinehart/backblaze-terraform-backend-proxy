@@ -121,6 +121,14 @@ func (b2 B2) Store(bs []byte) error {
 	return nil
 }
 
+func (b2 B2) Lock(filename string) error {
+	return nil
+}
+
+func (b2 B2) Unlock(filename string) error {
+	return nil
+}
+
 func authorizeAccount(keyID, appKey string) (*responseAuthorizeAccount, error) {
 	// Define Request
 	authString := "Basic " + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", keyID, appKey)))
