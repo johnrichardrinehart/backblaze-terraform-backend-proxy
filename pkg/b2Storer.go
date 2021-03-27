@@ -146,21 +146,46 @@ func (b2 B2) Store(bs []byte) error {
 	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
 
 	_, err := b2.Client.PutObject(&s3.PutObjectInput{
-		Body:                      buf,
-		Bucket:                    bucketName,
-		Key:                       objectKey,
-		ObjectLockLegalHoldStatus: aws.String(s3.ObjectLockLegalHoldStatusOn),
+		Body:   buf,
+		Bucket: bucketName,
+		Key:    objectKey,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload file, %v", err)
+		return fmt.Errorf("failed to upload file: %v", err)
 	}
 	return nil
 }
 
 func (b2 B2) Lock(filename string) error {
+	bucketName := aws.String(b2.BucketName)
+	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
+
+	_, err := b2.Client.PutObjectLegalHold(&s3.PutObjectLegalHoldInput{
+		Bucket: bucketName,
+		Key:    objectKey,
+		LegalHold: &s3.ObjectLockLegalHold{
+			Status: aws.String(s3.ObjectLockLegalHoldStatusOn),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to lock file: %v", err)
+	}
 	return nil
 }
 
 func (b2 B2) Unlock(filename string) error {
+	bucketName := aws.String(b2.BucketName)
+	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
+
+	_, err := b2.Client.PutObjectLegalHold(&s3.PutObjectLegalHoldInput{
+		Bucket: bucketName,
+		Key:    objectKey,
+		LegalHold: &s3.ObjectLockLegalHold{
+			Status: aws.String(s3.ObjectLockLegalHoldStatusOff),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to lock file: %v", err)
+	}
 	return nil
 }
