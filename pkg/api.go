@@ -88,9 +88,17 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		_, err := p.getState(r)
+		bs, err := p.getState(r)
 		if err != nil {
 			log.Printf("failed to retrieve state: %s", err)
+		}
+		if n, err := w.Write(bs); n != len(bs) || err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			if n == len(bs) {
+				log.Printf("failed to write response: %s", err)
+				return
+			}
+			log.Printf("failed to write %d bytes, only wrote %d", len(bs), n)
 		}
 	case http.MethodPost:
 		if len(r.URL.Query()["ID"]) != 1 {

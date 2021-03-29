@@ -23,7 +23,13 @@ func main() {
 		log.Fatal("B2_APP_KEY env var is undefined")
 	}
 
-	b2, err := backend.NewB2(keyID, appKey, "test")
+	filename, exists := os.LookupEnv("B2_FILE")
+	if !exists {
+		log.Println(`Warning: No filename passed with env var B2_FILE, using "terraform.tfstate"`)
+		filename = "terraform.tfstate"
+	}
+
+	b2, err := backend.NewB2(keyID, appKey, filename)
 	if err != nil {
 		log.Fatalf("failed to construct B2 backend: %s", err)
 	}
