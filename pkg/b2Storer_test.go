@@ -33,17 +33,31 @@ func TestMain(m *testing.M) {
 // 2. Upload data
 // 3. Unlock file
 func TestCycle(t *testing.T) {
-	b2.Filename = "TestCycle"
-	if err := b2.Store(nil); err != nil {
-		t.Errorf("TestCycle failed to store the document: %s", err)
+	b2.APIUrl = "infrastructure/TestCycle"
+	obj := Object{
+		LockID: "",
+		State:  nil,
 	}
-	if err := b2.Lock(); err != nil {
+	if err := b2.Store(obj); err != nil {
+		t.Errorf("TestCycle failed to store the document: %s", err)
+		return
+	}
+
+	lockID := "1234"
+	if err := b2.Lock(lockID); err != nil {
 		t.Errorf("TestCycle failed to lock: %s", err)
+		return
 	}
-	if err := b2.Store([]byte("test document")); err != nil {
+
+	obj.LockID = lockID
+
+	if err := b2.Store(obj); err != nil {
 		t.Errorf("TestCycle failed to store the document: %s", err)
+		return
 	}
-	if err := b2.Unlock(); err != nil {
+
+	if err := b2.Unlock(lockID); err != nil {
 		t.Errorf("TestCycle failed to unlock: %s", err)
+		return
 	}
 }

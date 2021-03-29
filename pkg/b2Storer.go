@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -20,8 +21,7 @@ const API_VERSION = "v2"
 type B2 struct {
 	AccountAuthorizationAPIToken string // auth token for API calls - valid for 24h
 	APIUrl                       string // for API calls (not uploading/downloading)
-	Filename                     string // filename of the object to upload/download
-	FilenamePrefix               string // bucket-configured filename prefix (app key security restriction)
+	Key                          string // location of state file (prefix + constructor-passed-path)
 	BucketName                   string // Bucket on which to perform operations
 	Client                       *s3.S3 // S3 Client
 	// DownloadURL                  string // for downloading files (upload URLs are obtained from get_upload_url)
@@ -125,66 +125,133 @@ func NewB2(keyID, appKey, path string) (*B2, error) {
 	s3Client := s3.New(newSession)
 
 	b2 := B2{
-		Filename:       path,
-		FilenamePrefix: authInfo.Allowed.NamePrefix,
-		BucketName:     authInfo.Allowed.BucketName,
-		Client:         s3Client,
+		Key:        authInfo.Allowed.NamePrefix + path,
+		BucketName: authInfo.Allowed.BucketName,
+		Client:     s3Client,
 	}
 
 	return &b2, nil
 }
 
+func (b2 B2) Retrieve() (*Object, error) {
+	out, err := b2.Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(b2.BucketName),
+		Key:    &b2.Key,
+	})
+	if err != nil {
+		if awsErr, ok := err.(awserr.Error); ok {
+			// No document exists
+			if awsErr.Code() == s3.ErrCodeNoSuchKey {
+				return nil, ErrNoExist
+			}
+		}
+		return nil, fmt.Errorf("failed to retrieve object: %s", err)
+	}
+
+	var obj Object
+	if err := json.NewDecoder(out.Body).Decode(&obj); err != nil {
+		return nil, fmt.Errorf("failed to parse remote state object: %s", err)
+	}
+
+	return &obj, nil
+}
+
 // Store writes the bytes to B2 at b2.Path
 // 1. Get the URL for uploading
 // 2. Upload the datfa
-func (b2 B2) Store(bs []byte) error {
-	buf := bytes.NewReader(bs)
+func (b2 B2) Store(obj Object) error {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(obj); err != nil {
+		return fmt.Errorf("failed to marshal object for storing: %s", err)
+	}
 
-	bucketName := aws.String(b2.BucketName)
-	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
+	rdr := bytes.NewReader(buf.Bytes())
 
-	_, err := b2.Client.PutObject(&s3.PutObjectInput{
-		Body:   buf,
-		Bucket: bucketName,
-		Key:    objectKey,
-	})
-	if err != nil {
+	if _, err := b2.Client.PutObject(&s3.PutObjectInput{
+		Body:   rdr,
+		Bucket: &b2.BucketName,
+		Key:    &b2.Key,
+	}); err != nil {
 		return fmt.Errorf("failed to upload file: %v", err)
 	}
+
 	return nil
 }
 
-func (b2 B2) Lock() error {
-	bucketName := aws.String(b2.BucketName)
-	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
-
-	_, err := b2.Client.PutObjectLegalHold(&s3.PutObjectLegalHoldInput{
-		Bucket: bucketName,
-		Key:    objectKey,
-		LegalHold: &s3.ObjectLockLegalHold{
-			Status: aws.String(s3.ObjectLockLegalHoldStatusOn),
-		},
+func (b2 B2) Lock(id string) error {
+	out, err := b2.Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(b2.BucketName),
+		Key:    &b2.Key,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to lock file: %v", err)
+		return fmt.Errorf("failed to retrieve object to check lock status: %s", err)
 	}
+
+	var obj Object
+	if err := json.NewDecoder(out.Body).Decode(&obj); err != nil {
+		return fmt.Errorf("failed to parse remote state object: %s", err)
+	}
+
+	if obj.LockID != "" && obj.LockID != id {
+		return fmt.Errorf("unable to lock with id %s - currently locked by id %s", id, obj.LockID)
+	}
+
+	obj.LockID = id
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(obj); err != nil {
+		return fmt.Errorf("unable to generate JSON payload for locking: %s", err)
+	}
+
+	b2.Client.PutObject(&s3.PutObjectInput{
+		Body:   bytes.NewReader(buf.Bytes()),
+		Bucket: &b2.BucketName,
+		Key:    &b2.Key,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to marhal JSON for locking: %s", err)
+	}
+
 	return nil
 }
 
-func (b2 B2) Unlock() error {
-	bucketName := aws.String(b2.BucketName)
-	objectKey := aws.String(b2.FilenamePrefix + b2.Filename)
+func (b2 B2) Unlock(id string) error {
 
-	_, err := b2.Client.PutObjectLegalHold(&s3.PutObjectLegalHoldInput{
-		Bucket: bucketName,
-		Key:    objectKey,
-		LegalHold: &s3.ObjectLockLegalHold{
-			Status: aws.String(s3.ObjectLockLegalHoldStatusOff),
-		},
+	out, err := b2.Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(b2.BucketName),
+		Key:    &b2.Key,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to lock file: %v", err)
+		return fmt.Errorf("failed to retrieve object to check lock status: %s", err)
 	}
+
+	var obj Object
+	if err := json.NewDecoder(out.Body).Decode(&obj); err != nil {
+		return fmt.Errorf("failed to parse remote state object: %s", err)
+	}
+
+	if obj.LockID != "" && obj.LockID != id {
+		return fmt.Errorf("unable to unlock using id %s - currently locked by id %s", id, obj.LockID)
+	}
+
+	obj.LockID = "" // unlock it
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(obj); err != nil {
+		return fmt.Errorf("unable to generate JSON payload for locking: %s", err)
+	}
+
+	b2.Client.PutObject(&s3.PutObjectInput{
+		Body:   bytes.NewReader(buf.Bytes()),
+		Bucket: &b2.BucketName,
+		Key:    &b2.Key,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON for locking: %s", err)
+	}
+
 	return nil
 }
 

@@ -15,12 +15,19 @@ import (
 	"time"
 )
 
+var ErrNoExist = errors.New("file does not exist (yet!)")
 var ErrNotLocked = errors.New("error writing - resource not locked")
 
 type Storer interface {
-	Store([]byte) error // Store file in bucket
-	Lock() error        // Lock bucket file
-	Unlock() error      // Unlock bucket file
+	Store(Object) error         // Store file in bucket
+	Retrieve() (*Object, error) // Retrieve file from bucket
+	Lock(string) error          // Lock bucket file
+	Unlock(string) error        // Unlock bucket file
+}
+
+type Object struct {
+	LockID string `json:"lock_id"`
+	State  []byte `json:"state"`
 }
 
 type Proxy struct {
@@ -57,7 +64,6 @@ func NewServer(proxyAddress string, storer Storer) (*Proxy, error) {
 }
 
 func (p *Proxy) Start() error {
-
 	log.Printf("backblaze proxy starting at: %s", p.Addr)
 
 	if err := p.Server.ListenAndServe(); err != nil {
@@ -92,7 +98,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		id := r.URL.Query()["ID"][0]
+		lockID := r.URL.Query().Get("ID") // Lock ID
 
 		md5sum := r.Header.Get("content-md5") // case-insensitive
 		if md5sum == "" {
@@ -113,28 +119,41 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := p.postState(id, md5sum, int64(l), r.Body); err != nil {
+		if err := p.postState(lockID, md5sum, int64(l), r.Body); err != nil {
 			log.Printf("failed to post state: %s", err)
 		}
 	case "LOCK":
-		if err := p.lockState(r.Body); err != nil {
+		var l Lock
+		if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
+			log.Printf("failed to JSON-decode body of terraform lock request: %s", err)
+		}
+		if err := p.lockState(l.ID); err != nil {
 			log.Printf("failed to lock state: %s", err)
 		}
 	case "UNLOCK":
-		if err := p.unlockState(r.Body); err != nil {
-			log.Printf("failed to lock state: %s", err)
+		var l Lock
+		if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
+			log.Printf("failed to JSON-decode body of terraform unlock request: %s", err)
+		}
+		if err := p.unlockState(l.ID); err != nil {
+			log.Printf("failed to unlock state: %s", err)
 		}
 	}
 
 }
 
-func (*Proxy) getState(r *http.Request) ([]byte, error) {
+func (p *Proxy) getState(r *http.Request) ([]byte, error) {
 	log.Println("getting state")
 
-	return nil, nil
+	obj, err := p.Retrieve()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get state: %s", err)
+	}
+
+	return obj.State, nil
 }
 
-func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
+func (p *Proxy) postState(lockID, md5sum string, n int64, body io.Reader) error {
 	log.Println("posting state")
 
 	// read the body
@@ -160,29 +179,66 @@ func (p *Proxy) postState(id, md5sum string, n int64, body io.Reader) error {
 		return errors.New("invalid checksum")
 	}
 
-	return p.Store(bs)
+	// check that we have the lock to execute the update
+	if lockID != "" {
+		obj, err := p.Retrieve()
+		if err != nil {
+			return fmt.Errorf("failed to retrieve document for updating: %s", err)
+		}
+
+		if lockID != obj.LockID {
+			return fmt.Errorf("unallowed to unlock, your lockID is %s and you need %s", lockID, obj.LockID)
+		}
+	}
+
+	obj := Object{
+		LockID: lockID,
+		State:  bs,
+	}
+
+	if err := p.Store(obj); err != nil {
+		return fmt.Errorf("failed to store file: %s", err)
+	}
+
+	return nil
 }
 
-func (p *Proxy) lockState(body io.Reader) error {
+func (p *Proxy) lockState(id string) error {
 	log.Println("locking state")
 
-	var l Lock
-
-	if err := json.NewDecoder(body).Decode(&l); err != nil {
-		return err
+	// check that it's not currently locked
+	obj, err := p.Retrieve()
+	if err != nil {
+		// new state file, need to create an empty one
+		if err == ErrNoExist {
+			obj := Object{
+				LockID: id,
+				State:  nil,
+			}
+			if err := p.Storer.Store(obj); err != nil {
+				return fmt.Errorf("failed to create and lock new state file: %s", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to retrieve document for updating: %s", err)
+	}
+	if obj.LockID != "" {
+		return fmt.Errorf("unable to lock with id %s- file currently locked with lock ID %s", id, obj.LockID)
 	}
 
-	return p.Lock()
+	return p.Lock(id)
 }
 
-func (p *Proxy) unlockState(body io.Reader) error {
+func (p *Proxy) unlockState(id string) error {
 	log.Println("unlocking state")
 
-	var l Lock
-
-	if err := json.NewDecoder(body).Decode(&l); err != nil {
-		return err
+	// check that it's currently locked by us
+	obj, err := p.Retrieve()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve document for updating: %s", err)
 	}
-
-	return p.Unlock()
+	if obj.LockID != id {
+		return fmt.Errorf("unable to unlock with lock ID %s - file currently locked with lock ID %s", id, obj.LockID)
+	}
+	return p.Unlock(id)
 }
