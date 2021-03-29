@@ -187,3 +187,23 @@ func (b2 B2) Unlock() error {
 	}
 	return nil
 }
+
+func (b2 B2) DeleteLockedFile(name, id string) error {
+	if _, err := b2.Client.PutObjectLegalHold(&s3.PutObjectLegalHoldInput{
+		Bucket: aws.String(b2.BucketName),
+		Key:    aws.String(name),
+		LegalHold: &s3.ObjectLockLegalHold{
+			Status: aws.String(s3.ObjectLockLegalHoldStatusOff),
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to lock file: %v", err)
+	}
+	if _, err := b2.Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket:    aws.String(b2.BucketName),
+		Key:       aws.String(name),
+		VersionId: aws.String(id),
+	}); err != nil {
+		return fmt.Errorf("failed to delete file: %v", err)
+	}
+	return nil
+}
