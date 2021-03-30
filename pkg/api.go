@@ -101,11 +101,6 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("failed to write %d bytes, only wrote %d", len(bs), n)
 		}
 	case http.MethodPost:
-		if len(r.URL.Query()["ID"]) != 1 {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
 		lockID := r.URL.Query().Get("ID") // Lock ID
 
 		md5sum := r.Header.Get("content-md5") // case-insensitive
@@ -128,22 +123,28 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := p.postState(lockID, md5sum, int64(l), r.Body); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("failed to post state: %s", err)
 		}
 	case "LOCK":
 		var l Lock
 		if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("failed to JSON-decode body of terraform lock request: %s", err)
+			return
 		}
 		if err := p.lockState(l.ID); err != nil {
+			w.WriteHeader(http.StatusLocked)
 			log.Printf("failed to lock state: %s", err)
 		}
 	case "UNLOCK":
 		var l Lock
 		if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("failed to JSON-decode body of terraform unlock request: %s", err)
 		}
 		if err := p.unlockState(l.ID); err != nil {
+			w.WriteHeader(http.StatusLocked)
 			log.Printf("failed to unlock state: %s", err)
 		}
 	}
